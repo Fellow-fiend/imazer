@@ -16,6 +16,7 @@ use crate::core::resize::{
     SizeMode,
 };
 use crate::ui;
+use crate::ui::i18n::{self, Lang};
 
 #[derive(Clone, Debug)]
 struct ImageItem {
@@ -43,10 +44,11 @@ pub struct AppState {
     worker: Option<thread::JoinHandle<Vec<String>>>,
     progress: Option<Arc<JobProgress>>,
     logs: Vec<String>,
-    last_edited: LastEdited,
+    last_edited: Option<LastEdited>,
     preview_texture: Option<egui::TextureHandle>,
     preview_receiver: Option<mpsc::Receiver<Result<(Vec<u8>, [usize; 2])>>>,
     preview_loading_for: Option<PathBuf>,
+    lang: Lang,
 }
 
 impl AppState {
@@ -58,14 +60,19 @@ impl AppState {
             worker: None,
             progress: None,
             logs: Vec::new(),
-            last_edited: LastEdited::Width,
+            last_edited: Some(LastEdited::Width),
             preview_texture: None,
             preview_receiver: None,
             preview_loading_for: None,
+            lang: Lang::En,
         };
 
         app.add_paths(initial_files);
         app
+    }
+
+    fn tr(&self, key: &'static str) -> &'static str {
+        i18n::t(self.lang, key)
     }
 
     fn add_paths(&mut self, paths: Vec<PathBuf>) {
@@ -151,6 +158,7 @@ impl AppState {
     fn choose_output_dir(&mut self) {
         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
             self.settings.output_dir = Some(dir);
+            self.settings.auto_output_folder = false;
             self.save_current_settings();
         }
     }
@@ -184,8 +192,7 @@ impl AppState {
             files
                 .par_iter()
                 .map(|path| {
-                    let output_dir =
-                        resolve_output_dir(path, settings.output_dir.clone(), multi_input_dirs);
+                    let output_dir = resolve_output_dir(path, &settings, multi_input_dirs);
                     let result = process_one(path, &output_dir, &settings)
                         .map(|saved| format!("OK: {}", saved.display()))
                         .unwrap_or_else(|err| format!("ERR: {} => {err:#}", path.display()));
@@ -253,6 +260,13 @@ impl AppState {
 
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_pixels_per_point(1.25);
+        let mut style = (*ctx.style()).clone();
+        style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+        style.spacing.button_padding = egui::vec2(12.0, 8.0);
+        style.spacing.interact_size = egui::vec2(48.0, 32.0);
+        ctx.set_style(style);
+
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if !dropped.is_empty() {
             let files = dropped
@@ -280,9 +294,15 @@ impl eframe::App for AppState {
             ui.horizontal_wrapped(|ui| {
                 ui.heading("Imazer");
                 ui.separator();
-                ui.label("Drop images here or use Select Files.");
+                ui.label(self.tr("toolbar_hint"));
+                egui::ComboBox::from_id_source("lang-switcher")
+                    .selected_text(self.lang.display_name())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.lang, Lang::En, Lang::En.display_name());
+                        ui.selectable_value(&mut self.lang, Lang::Ru, Lang::Ru.display_name());
+                    });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui::sized_button(ui, "Resize Images").clicked() {
+                    if ui::sized_button(ui, self.tr("resize_images")).clicked() {
                         self.launch_resize();
                     }
                 });
@@ -291,81 +311,107 @@ impl eframe::App for AppState {
 
         egui::SidePanel::left("settings")
             .resizable(true)
-            .default_width(340.0)
+            .default_width(380.0)
             .show(ctx, |ui| {
-                ui.heading("Batch Settings");
-                ui.add_space(8.0);
+                ui.heading(self.tr("batch_settings"));
+                ui.add_space(10.0);
+
+                let pixels_label = self.tr("pixels");
+                let percent_label = self.tr("percent");
+                let keep_ratio_label = self.tr("keep_ratio");
+                let auto_output_label = self.tr("auto_output");
+
+                let mut width = self.settings.width as i32;
+                let mut height = self.settings.height as i32;
+
+                let mut width_changed = false;
+                let mut height_changed = false;
 
                 ui.horizontal(|ui| {
-                    ui.label("Width");
-                    let mut width = self.settings.width as i32;
-                    if ui
+                    ui.label(self.tr("width"));
+                    width_changed = ui
                         .add(egui::DragValue::new(&mut width).range(1..=100_000))
-                        .changed()
-                    {
-                        self.settings.width = width.max(1) as u32;
-                        self.last_edited = LastEdited::Width;
-                        self.apply_aspect_ratio_after_width_change();
-                        self.save_current_settings();
-                    }
+                        .changed();
                 });
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_source("width-mode")
                         .selected_text(match self.settings.width_mode {
-                            SizeMode::Pixels => "Pixels",
-                            SizeMode::Percent => "Percent",
+                            SizeMode::Pixels => pixels_label,
+                            SizeMode::Percent => percent_label,
                         })
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
                                 &mut self.settings.width_mode,
                                 SizeMode::Pixels,
-                                "Pixels",
+                                pixels_label,
                             );
                             ui.selectable_value(
                                 &mut self.settings.width_mode,
                                 SizeMode::Percent,
-                                "Percent",
+                                percent_label,
                             );
                         });
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label("Height");
-                    let mut height = self.settings.height as i32;
-                    if ui
+                    ui.label(self.tr("height"));
+                    height_changed = ui
                         .add(egui::DragValue::new(&mut height).range(1..=100_000))
-                        .changed()
-                    {
-                        self.settings.height = height.max(1) as u32;
-                        self.last_edited = LastEdited::Height;
-                        self.apply_aspect_ratio_after_height_change();
-                        self.save_current_settings();
-                    }
+                        .changed();
                 });
                 egui::ComboBox::from_id_source("height-mode")
                     .selected_text(match self.settings.height_mode {
-                        SizeMode::Pixels => "Pixels",
-                        SizeMode::Percent => "Percent",
+                        SizeMode::Pixels => pixels_label,
+                        SizeMode::Percent => percent_label,
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
                             &mut self.settings.height_mode,
                             SizeMode::Pixels,
-                            "Pixels",
+                            pixels_label,
                         );
                         ui.selectable_value(
                             &mut self.settings.height_mode,
                             SizeMode::Percent,
-                            "Percent",
+                            percent_label,
                         );
                     });
 
+                if width_changed {
+                    self.settings.width = width.max(1) as u32;
+                    self.last_edited = Some(LastEdited::Width);
+                }
+                if height_changed {
+                    self.settings.height = height.max(1) as u32;
+                    self.last_edited = Some(LastEdited::Height);
+                }
+
+                if self.settings.keep_aspect_ratio {
+                    match (width_changed, height_changed) {
+                        (true, false) => self.apply_aspect_ratio_after_width_change(),
+                        (false, true) => self.apply_aspect_ratio_after_height_change(),
+                        (true, true) => {
+                            if self.last_edited == Some(LastEdited::Width) {
+                                self.apply_aspect_ratio_after_width_change();
+                            } else {
+                                self.apply_aspect_ratio_after_height_change();
+                            }
+                        }
+                        (false, false) => {}
+                    }
+                }
+
+                if width_changed || height_changed {
+                    self.save_current_settings();
+                    ctx.request_repaint();
+                }
+
                 if ui
-                    .checkbox(&mut self.settings.keep_aspect_ratio, "Lock aspect ratio")
+                    .checkbox(&mut self.settings.keep_aspect_ratio, keep_ratio_label)
                     .changed()
                 {
                     if self.settings.keep_aspect_ratio {
-                        if self.last_edited == LastEdited::Width {
+                        if self.last_edited == Some(LastEdited::Width) {
                             self.apply_aspect_ratio_after_width_change();
                         } else {
                             self.apply_aspect_ratio_after_height_change();
@@ -378,22 +424,30 @@ impl eframe::App for AppState {
                 ui.separator();
                 ui.add_space(8.0);
 
-                ui.label("Output folder");
+                if ui
+                    .checkbox(&mut self.settings.auto_output_folder, auto_output_label)
+                    .changed()
+                {
+                    self.save_current_settings();
+                }
+
+                ui.label(self.tr("output_folder"));
                 let text = self
                     .settings
                     .output_dir
                     .as_ref()
                     .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| {
-                        "Auto: source folder (or source/resized for mixed folders)".to_string()
-                    });
+                    .unwrap_or_else(|| self.tr("output_auto_hint").to_string());
                 ui.label(egui::RichText::new(text).small());
                 ui.horizontal(|ui| {
-                    if ui::sized_button(ui, "Choose Folder").clicked() {
-                        self.choose_output_dir();
-                    }
-                    if ui::sized_button(ui, "Use Auto").clicked() {
+                    ui.add_enabled_ui(!self.settings.auto_output_folder, |ui| {
+                        if ui::sized_button(ui, self.tr("choose_folder")).clicked() {
+                            self.choose_output_dir();
+                        }
+                    });
+                    if ui::sized_button(ui, self.tr("clear_output")).clicked() {
                         self.settings.output_dir = None;
+                        self.settings.auto_output_folder = true;
                         self.save_current_settings();
                     }
                 });
@@ -411,13 +465,13 @@ impl eframe::App for AppState {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui::sized_button(ui, "Select Files").clicked() {
+                if ui::sized_button(ui, self.tr("select_files")).clicked() {
                     self.select_files();
                 }
-                if ui::sized_button(ui, "Remove Selected").clicked() {
+                if ui::sized_button(ui, self.tr("remove_selected")).clicked() {
                     self.remove_selected();
                 }
-                if ui::sized_button(ui, "Clear All").clicked() {
+                if ui::sized_button(ui, self.tr("clear_all")).clicked() {
                     self.images.clear();
                     self.selected_idx = None;
                     self.preview_texture = None;
@@ -425,12 +479,16 @@ impl eframe::App for AppState {
             });
 
             ui.add_space(8.0);
-            ui.label(format!("Loaded images: {}", self.images.len()));
+            ui.label(format!(
+                "{}: {}",
+                self.tr("loaded_images"),
+                self.images.len()
+            ));
 
             ui.columns(2, |cols| {
                 cols[0].group(|ui| {
                     ui.set_min_height(380.0);
-                    ui.label(egui::RichText::new("Image Queue").strong());
+                    ui.label(egui::RichText::new(self.tr("image_queue")).strong());
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         let mut clicked_idx = None;
                         for (idx, item) in self.images.iter().enumerate() {
@@ -460,7 +518,7 @@ impl eframe::App for AppState {
 
                 cols[1].group(|ui| {
                     ui.set_min_height(380.0);
-                    ui.label(egui::RichText::new("Preview").strong());
+                    ui.label(egui::RichText::new(self.tr("preview")).strong());
                     self.request_preview_if_needed();
                     if let Some(tex) = &self.preview_texture {
                         let available = ui.available_size();
@@ -471,7 +529,7 @@ impl eframe::App for AppState {
                         ui.image((tex.id(), original * scale.max(0.1)));
                     } else {
                         ui.centered_and_justified(|ui| {
-                            ui.label("Select an image to preview");
+                            ui.label(self.tr("select_for_preview"));
                         });
                     }
                 });
@@ -479,7 +537,7 @@ impl eframe::App for AppState {
 
             ui.add_space(8.0);
             ui.separator();
-            ui.label(egui::RichText::new("Log").strong());
+            ui.label(egui::RichText::new(self.tr("log")).strong());
             egui::ScrollArea::vertical()
                 .max_height(120.0)
                 .show(ui, |ui| {
@@ -493,11 +551,13 @@ impl eframe::App for AppState {
 
 fn resolve_output_dir(
     path: &Path,
-    override_dir: Option<PathBuf>,
+    settings: &PersistedSettings,
     multi_input_dirs: bool,
 ) -> PathBuf {
-    if let Some(dir) = override_dir {
-        return dir;
+    if !settings.auto_output_folder {
+        if let Some(dir) = settings.output_dir.clone() {
+            return dir;
+        }
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
