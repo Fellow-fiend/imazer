@@ -1,0 +1,21 @@
+[package]
+name = "imazer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = { version = "0.28", default-features = true }
+egui = "0.28"
+rfd = "0.14"
+image = { version = "0.25", default-features = true, features = ["png", "jpeg", "gif", "webp", "tiff"] }
+resvg = "0.43"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+anyhow = "1.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
