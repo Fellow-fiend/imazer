@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: imazer
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64 build target
+          - os: ubuntu-latest
+            platform: linux
+            archive_ext: tar.gz
+            artifact_name: imazer-linux-x86_64
+          # macOS Apple Silicon build target
+          - os: macos-latest
+            platform: macos
+            archive_ext: tar.gz
+            artifact_name: imazer-macos-aarch64
+          # Windows x86_64 build target
+          - os: windows-latest
+            platform: windows
+            archive_ext: zip
+            artifact_name: imazer-windows-x86_64
+
+    steps:
+      # 1) Pull repository sources
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # 2) Install Rust toolchain for deterministic release builds
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 3) Build release binary and collect it under dist/ with consistent naming
+      - name: Build binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cargo build --release --locked
+          cp "target/release/${APP_NAME}" "dist/${{ matrix.artifact_name }}"
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          cargo build --release --locked
+          Copy-Item "target/release/$env:APP_NAME.exe" "dist/${{ matrix.artifact_name }}.exe"
+
+      # 4) Generate SHA256 checksums for the distributable binary
+      - name: Generate checksum (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum dist/* > dist/SHA256SUMS-${{ matrix.platform }}.txt
+
+      - name: Generate checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $checksumFile = "dist/SHA256SUMS-${{ matrix.platform }}.txt"
+          Get-ChildItem dist -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -FilePath $checksumFile -Append -Encoding ascii
+          }
+
+      # 5) Compress each platform output into a single archive for release uploads
+      - name: Create archive (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "dist/${{ matrix.artifact_name }}.${{ matrix.archive_ext }}" -C dist "${{ matrix.artifact_name }}" "SHA256SUMS-${{ matrix.platform }}.txt"
+
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/${{ matrix.artifact_name }}.exe","dist/SHA256SUMS-${{ matrix.platform }}.txt" -DestinationPath "dist/${{ matrix.artifact_name }}.${{ matrix.archive_ext }}" -Force
+
+      # 6) Upload archives and checksum files as workflow artifacts for the release job
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
+            dist/SHA256SUMS-${{ matrix.platform }}.txt
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      # 7) Download all per-platform artifacts produced by the matrix
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # 8) Create (or update) the GitHub Release and upload all assets
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            Automated release for tag **${{ github.ref_name }}**.
+          files: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/SHA256SUMS-*.txt
