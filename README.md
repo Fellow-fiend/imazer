@@ -1,124 +1,86 @@
 # Imazer
 
-Imazer is a simple, minimal, and fast cross-platform desktop image resizer.
+Imazer is a fast cross-platform desktop image resizer built in Rust.
 
 ## Features
 
-- Clean GUI (drag-and-drop + file picker)
-- Batch resize with multi-threading (Rayon)
-- Resize by pixels or percentage
-- Optional aspect-ratio lock
-- Output directory picker
-- Supported input formats:
-  - PNG
-  - JPG/JPEG
-  - WEBP
-  - GIF
-  - TIFF
-  - SVG (rasterized first, saved as PNG)
-- Preserves original names with `_resized` suffix
-- Remembers last used settings
-- Windows context menu integration script
-
-## Tech stack
-
-- Rust
-- egui/eframe for GUI
-- image crate for raster formats
-- resvg/usvg for SVG rasterization
-
-No Node.js / Python runtime needed.
+- Modern `egui` desktop UI with toolbar, settings panel, file queue, and image preview.
+- Drag & drop files or folders (folders are scanned recursively).
+- Batch resize with parallel execution (`rayon`).
+- Resize by pixel or percentage.
+- Correct aspect-ratio lock based on original dimensions.
+- Smart output behavior:
+  - Single source directory: outputs to source folder by default.
+  - Multiple source directories: outputs to `resized/` per source directory by default.
+  - Optional UI override for custom output folder.
+- Settings persistence (`serde` + JSON config file).
+- Windows packaging assets (context menu `.reg`, Inno Setup installer, signing script).
 
 ## Project layout
 
 ```text
 imazer/
 ├── Cargo.toml
-├── Makefile
 ├── src/
-│   └── main.rs
+│   ├── main.rs
+│   ├── app.rs
+│   ├── ui/
+│   │   └── mod.rs
+│   ├── core/
+│   │   ├── aspect_ratio.rs
+│   │   ├── mod.rs
+│   │   └── resize.rs
+│   └── platform/
+│       ├── mod.rs
+│       └── windows.rs
+├── installer/
+│   ├── resize_context_menu.reg
+│   └── setup.iss
 └── scripts/
+    ├── build_release.bat
+    ├── sign.bat
     └── windows/
-        ├── install_context_menu.reg
-        └── uninstall_context_menu.reg
 ```
 
-## Build requirements
-
-Install Rust toolchain (`rustup` + `cargo`).
-
-### Windows (MSVC or MinGW)
-
-```bash
-make release
-```
-
-Or directly:
+## Build
 
 ```bash
 cargo build --release
 ```
 
-Binary path:
+Output binary:
 
-```text
-target/release/imazer.exe
-```
+- Windows: `target/release/imazer.exe`
+- Linux/macOS: `target/release/imazer`
 
-> For Windows 7 compatibility, build using a Rust toolchain that still targets Windows 7 in your environment policy and test on a real Win7 machine.
+## Installer (Windows)
 
-### Linux (gcc/clang toolchain available)
-
-```bash
-make release
-```
-
-Binary path:
-
-```text
-target/release/imazer
-```
-
-### macOS (clang)
+1. Build release binary.
+2. Build installer with Inno Setup:
 
 ```bash
-make release
+iscc installer/setup.iss
 ```
 
-Binary path:
+Generated installer is placed in `installer/dist/`.
 
-```text
-target/release/imazer
+## Context menu registration (Windows)
+
+Use the installer (preferred), or import:
+
+- `installer/resize_context_menu.reg`
+
+## Code signing (Windows)
+
+```bat
+set SIGN_PWD=your-pfx-password
+scripts\sign.bat target\release\imazer.exe path\to\certificate.pfx
 ```
 
-## Run
+## CLI usage
+
+The app accepts file/folder paths as arguments:
 
 ```bash
-make run
+imazer file1.png folder_with_images
 ```
-
-## CLI usage (also used by Windows context menu)
-
-You can pass image paths directly:
-
-```bash
-imazer file1.png file2.jpg
-```
-
-The app opens with these files preloaded.
-
-## Windows context menu integration
-
-1. Copy `imazer.exe` to `%ProgramFiles%\Imazer\imazer.exe`.
-2. Double-click `scripts/windows/install_context_menu.reg` and accept registry changes.
-3. Right-click image files and select **Resize images**.
-
-To remove:
-
-1. Double-click `scripts/windows/uninstall_context_menu.reg`.
-
-## Notes on performance
-
-- Resizing runs in parallel using worker threads.
-- Uses Lanczos3 filtering for quality.
-- Avoids loading all images into memory at once during the batch loop.
