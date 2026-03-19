@@ -1,0 +1,14 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\SystemFileAssociations\image\shell\ImazerResize]
+@="Resize images"
+"Icon"="\"%ProgramFiles%\\Imazer\\imazer.exe\""
+
+[HKEY_CLASSES_ROOT\SystemFileAssociations\image\shell\ImazerResize\command]
+@="\"%ProgramFiles%\\Imazer\\imazer.exe\" \"%1\""
+
+[HKEY_CLASSES_ROOT\*\shell\ImazerResize]
+@="Resize images"
+
+[HKEY_CLASSES_ROOT\*\shell\ImazerResize\command]
+@="\"%ProgramFiles%\\Imazer\\imazer.exe\" \"%1\""
