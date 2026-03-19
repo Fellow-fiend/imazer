@@ -45,13 +45,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # 3) Build release binary and collect it under dist/ with consistent naming
+      #    Use --locked only when Cargo.lock exists (required for repositories
+      #    that intentionally do not commit a lockfile for library-first crates).
       - name: Build binary (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          cargo build --release --locked
+          CARGO_FLAGS=""
+          if [ -f Cargo.lock ]; then
+            CARGO_FLAGS="--locked"
+          fi
+          cargo build --release ${CARGO_FLAGS}
           cp "target/release/${APP_NAME}" "dist/${{ matrix.artifact_name }}"
 
       - name: Build binary (Windows)
@@ -59,7 +65,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          cargo build --release --locked
+          $cargoFlags = @()
+          if (Test-Path Cargo.lock) {
+            $cargoFlags += "--locked"
+          }
+          cargo build --release @cargoFlags
           Copy-Item "target/release/$env:APP_NAME.exe" "dist/${{ matrix.artifact_name }}.exe"
 
       # 4) Generate SHA256 checksums for the distributable binary
