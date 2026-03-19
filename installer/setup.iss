@@ -11,9 +11,11 @@ Compression=lzma
 SolidCompression=yes
 UninstallDisplayIcon={app}\imazer.exe
 ArchitecturesInstallIn64BitMode=x64
+DefaultLanguage=english
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked

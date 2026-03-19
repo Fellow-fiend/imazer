@@ -17,6 +17,8 @@ pub struct PersistedSettings {
     pub width_mode: SizeMode,
     pub height_mode: SizeMode,
     pub output_dir: Option<PathBuf>,
+    #[serde(default = "default_auto_output_folder")]
+    pub auto_output_folder: bool,
 }
 
 impl Default for PersistedSettings {
@@ -28,10 +30,14 @@ impl Default for PersistedSettings {
             width_mode: SizeMode::Pixels,
             height_mode: SizeMode::Pixels,
             output_dir: None,
+            auto_output_folder: true,
         }
     }
 }
 
+fn default_auto_output_folder() -> bool {
+    true
+}
 pub fn is_supported_image(path: &Path) -> bool {
     let ext = path
         .extension()
